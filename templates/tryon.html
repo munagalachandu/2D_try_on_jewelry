@@ -24,12 +24,10 @@
   h1{font-size:1.5rem;font-weight:700;color:#fff;margin-bottom:.3rem;text-align:center;text-shadow:0 0 20px rgba(200,130,255,.5)}
   .sub{color:#9b7eb8;font-size:.87rem;margin-bottom:1.8rem;text-align:center}
 
-  /* Tabs */
   .tabs{display:flex;gap:.5rem;margin-bottom:1.5rem;background:rgba(10,3,16,.4);padding:.35rem;border-radius:99px;border:1px solid rgba(216,191,216,.1)}
   .tab{padding:.5rem 1.4rem;border-radius:99px;font-size:.88rem;font-weight:600;cursor:pointer;border:none;color:#9b7eb8;background:transparent;font-family:inherit;transition:all .2s}
   .tab.active{background:linear-gradient(135deg,#6a22b8,#9b3ef0);color:#fff;box-shadow:0 0 20px rgba(130,50,240,.4)}
 
-  /* Webcam */
   #panel-webcam{display:flex;flex-direction:column;align-items:center;width:100%}
   .stream-wrap{
     position:relative;border-radius:16px;overflow:hidden;
@@ -41,7 +39,6 @@
   .stream-wrap img{width:100%;display:block}
   .stream-hint{position:absolute;bottom:.8rem;left:50%;transform:translateX(-50%);background:rgba(10,3,16,.8);color:#b89fc8;font-size:.75rem;padding:.3rem .8rem;border-radius:99px;white-space:nowrap;pointer-events:none;border:1px solid rgba(216,191,216,.1)}
 
-  /* Photo panel */
   #panel-photo{display:none;flex-direction:column;align-items:center;width:100%;max-width:600px}
   .drop{
     border:1.5px dashed rgba(180,100,255,.25);border-radius:14px;
@@ -66,6 +63,8 @@
 
   #spinner{display:none;margin:2rem auto;width:40px;height:40px;border:3px solid rgba(216,191,216,.1);border-top-color:#9b3ef0;border-radius:50%;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
+
+  #status-msg{display:none;color:#b89fc8;font-size:.83rem;text-align:center;margin-top:.6rem}
 
   footer{text-align:center;padding:1rem;color:#3a2050;font-size:.75rem;margin-top:auto}
 </style>
@@ -102,6 +101,7 @@
     </div>
     <button class="btn btn-purple" onclick="uploadPhoto()">✦ Apply Jewelry Try-On</button>
     <div id="spinner"></div>
+    <p id="status-msg">Processing… first load may take ~30 seconds ⏳</p>
     <div id="result-section">
       <img id="result-img" src="" alt="Try-On Result">
       <div class="actions">
@@ -115,6 +115,7 @@
 
 <script>
 const PID = "{{ product.id }}";
+
 function switchTab(name, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
@@ -123,27 +124,54 @@ function switchTab(name, el) {
   const img = document.querySelector('#panel-webcam img');
   img.src = name === 'webcam' ? `/stream/${PID}` : '';
 }
+
 function handleFile(input) {
   document.getElementById('file-name').textContent = input.files[0]?.name || '';
 }
+
 async function uploadPhoto() {
   const file = document.getElementById('faceFile').files[0];
   if (!file) { alert('Please select a face photo first.'); return; }
+
   document.getElementById('spinner').style.display = 'block';
+  document.getElementById('status-msg').style.display = 'block';
   document.getElementById('result-section').style.display = 'none';
+
   const fd = new FormData();
   fd.append('face', file);
-  const res  = await fetch(`/tryon-image/${PID}`, { method: 'POST', body: fd });
-  const data = await res.json();
-  document.getElementById('spinner').style.display = 'none';
-  if (data.result_url) {
-    document.getElementById('result-img').src = data.result_url + '?t=' + Date.now();
-    document.getElementById('dl-btn').href = `/download/${PID}`;
-    document.getElementById('result-section').style.display = 'flex';
-  } else {
-    alert('Try-on failed: ' + (data.error || 'Unknown error'));
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+    const res = await fetch(`/tryon-image/${PID}`, {
+      method: 'POST',
+      body: fd,
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    const data = await res.json();
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('status-msg').style.display = 'none';
+
+    if (data.result_url) {
+      document.getElementById('result-img').src = data.result_url + '?t=' + Date.now();
+      document.getElementById('dl-btn').href = `/download/${PID}`;
+      document.getElementById('result-section').style.display = 'flex';
+    } else {
+      alert('Try-on failed: ' + (data.error || 'Unknown error'));
+    }
+  } catch (err) {
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('status-msg').style.display = 'none';
+    if (err.name === 'AbortError') {
+      alert('Request timed out. Please try again.');
+    } else {
+      alert('Something went wrong. Please try again.');
+    }
   }
 }
+
 function resetPhoto() {
   document.getElementById('faceFile').value = '';
   document.getElementById('file-name').textContent = '';
