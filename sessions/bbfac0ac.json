@@ -4,7 +4,8 @@
   "label": "Necklace",
   "name": "necklace2.png",
   "processed": "https://res.cloudinary.com/dngnhjcuz/image/upload/v1773596155/jewelar/products/nnrqqxhyoznsdmp3grwt.png",
-  "qr": "https://res.cloudinary.com/dngnhjcuz/image/upload/v1773596155/jewelar/qr/whmwbhmgioqmzcke7yw6.png",
+  "qr": "https://res.cloudinary.com/dngnhjcuz/image/upload/v1773598518/jewelar_qr/qr_bbfac0ac.png",
   "tryon_url": "https://twod-try-on-jewelry.onrender.com/tryon/bbfac0ac",
-  "created": "2026-03-15T19:12:35.502555"
+  "created": "2026-03-15T19:12:35.502555",
+  "status": "ready"
 }
