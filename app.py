@@ -30,11 +30,11 @@ cloudinary.config(
 )
 
 # ---------------------------------------------------------------------------
-# Lazy loaders — so Flask binds its port before heavy models load
+# Lazy loaders
 # ---------------------------------------------------------------------------
 
 _get_face_landmarks_fn = None
-_remove_bg_fn = None
+_remove_bg_fn          = None
 
 def get_face_landmarks(frame):
     global _get_face_landmarks_fn
@@ -51,19 +51,19 @@ def remove_bg(raw_path, prod_dir):
     return _remove_bg_fn(raw_path, prod_dir)
 
 # ---------------------------------------------------------------------------
-# Pre-warm models in background so first request isn't slow
+# Pre-warm models in background
 # ---------------------------------------------------------------------------
 
 def _prewarm_models():
     import time
-    time.sleep(5)  # wait for Flask to bind port first
+    time.sleep(5)
     print("[prewarm] Loading mediapipe + rembg models in background...")
     try:
-        import numpy as _np
-        dummy = _np.zeros((100, 100, 3), dtype=_np.uint8)
+        dummy = np.zeros((100, 100, 3), dtype=np.uint8)
         get_face_landmarks(dummy)
+        print("[prewarm] mediapipe ready.")
     except Exception as e:
-        print(f"[prewarm] mediapipe load note: {e}")
+        print(f"[prewarm] mediapipe note: {e}")
     try:
         from preprocess import remove_bg as _fn
         global _remove_bg_fn
@@ -71,7 +71,7 @@ def _prewarm_models():
         print("[prewarm] rembg ready.")
     except Exception as e:
         print(f"[prewarm] rembg load failed: {e}")
-    print("[prewarm] Models ready.")
+    print("[prewarm] All models ready.")
 
 threading.Thread(target=_prewarm_models, daemon=True).start()
 
@@ -138,11 +138,51 @@ def _upload_qr_to_cloudinary(qr_path: str, pid: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Overlay helper — shared by MJPEG stream and static-image try-on
+# Background processing job
+# ---------------------------------------------------------------------------
+
+def _process_in_background(pid: str, raw_path: str, prod_dir: str,
+                            base_url: str, field: str, label: str,
+                            original_filename: str):
+    """Run bg removal + Cloudinary upload in a background thread."""
+    try:
+        print(f"[bg-job:{pid}] Starting background removal...")
+        processed_url = remove_bg(raw_path, prod_dir)
+        print(f"[bg-job:{pid}] Done: {processed_url}")
+    except Exception as e:
+        print(f"[bg-job:{pid}] remove_bg failed: {e}")
+        processed_url = raw_path  # fallback to raw if removal fails
+
+    # Upload QR now that we have the processed URL
+    tryon_url = f"{base_url}/tryon/{pid}"
+    qr_path   = os.path.join(prod_dir, "qr.png")
+    try:
+        generate_qr(tryon_url, qr_path)
+        qr_url = _upload_qr_to_cloudinary(qr_path, pid)
+    except Exception as e:
+        print(f"[bg-job:{pid}] QR generation failed: {e}")
+        qr_url = ""
+
+    # Update the saved product with final URLs + mark ready
+    _save_product(pid, {
+        "id":        pid,
+        "type":      field,
+        "label":     label,
+        "name":      original_filename,
+        "processed": processed_url,
+        "qr":        qr_url,
+        "tryon_url": tryon_url,
+        "status":    "ready",
+        "created":   datetime.now().isoformat(),
+    })
+    print(f"[bg-job:{pid}] Product ready.")
+
+
+# ---------------------------------------------------------------------------
+# Overlay helper
 # ---------------------------------------------------------------------------
 
 def _load_overlay_any(path: str):
-    """Load overlay from a Cloudinary URL or local path."""
     if _is_cloudinary_url(path):
         import urllib.request, tempfile
         try:
@@ -157,7 +197,6 @@ def _load_overlay_any(path: str):
 
 def _apply_overlay(frame: np.ndarray, product: dict, data: dict,
                    smoothers: dict | None = None):
-    """Apply jewelry overlay for *product* onto *frame* (in-place)."""
     ptype = product["type"]
     img   = _load_overlay_any(product["processed"])
     if img is None:
@@ -272,23 +311,26 @@ def upload():
         raw_path = os.path.join(prod_dir, f"raw_{filename}")
         f.save(raw_path)
 
-        processed_url = remove_bg(raw_path, prod_dir)
-
-        tryon_url = f"{base_url}/tryon/{pid}"
-        qr_path   = os.path.join(prod_dir, "qr.png")
-        generate_qr(tryon_url, qr_path)
-        qr_url = _upload_qr_to_cloudinary(qr_path, pid)
-
+        # Save immediately with status=processing so dashboard shows it right away
         _save_product(pid, {
             "id":        pid,
             "type":      field,
             "label":     label,
             "name":      f.filename,
-            "processed": processed_url,
-            "qr":        qr_url,
-            "tryon_url": tryon_url,
+            "processed": raw_path,   # temporary — will be replaced by bg job
+            "qr":        "",
+            "tryon_url": f"{base_url}/tryon/{pid}",
+            "status":    "processing",
             "created":   datetime.now().isoformat(),
         })
+
+        # Kick off background processing
+        threading.Thread(
+            target=_process_in_background,
+            args=(pid, raw_path, prod_dir, base_url, field, label, f.filename),
+            daemon=True
+        ).start()
+
         created += 1
 
     if created == 0:
@@ -302,6 +344,23 @@ def dashboard():
 
 
 # ---------------------------------------------------------------------------
+# API — poll product status (used by dashboard JS)
+# ---------------------------------------------------------------------------
+
+@app.route("/api/product-status/<pid>")
+def product_status(pid):
+    product = _load_product(pid)
+    if not product:
+        return jsonify(status="not_found"), 404
+    return jsonify(
+        status=product.get("status", "ready"),
+        tryon_url=product.get("tryon_url", ""),
+        qr_url=f"/qr/{pid}",
+        product_image_url=f"/product-image/{pid}",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Routes — Customer
 # ---------------------------------------------------------------------------
 
@@ -310,6 +369,8 @@ def tryon(pid):
     product = _load_product(pid)
     if not product:
         return "Session not found", 404
+    if product.get("status") == "processing":
+        return render_template("processing.html", product=product)
     return render_template("tryon.html", product=product)
 
 
@@ -327,6 +388,8 @@ def tryon_image(pid):
     product = _load_product(pid)
     if not product:
         return jsonify(error="Not found"), 404
+    if product.get("status") == "processing":
+        return jsonify(error="Product still processing, please wait"), 400
     f = request.files.get("face")
     if not f:
         return jsonify(error="No face image provided"), 400
@@ -371,7 +434,9 @@ def product_image(pid):
     path = product["processed"]
     if _is_cloudinary_url(path):
         return redirect(path)
-    return send_file(path, mimetype="image/png")
+    if os.path.exists(path):
+        return send_file(path, mimetype="image/png")
+    return "Not ready yet", 404
 
 
 @app.route("/qr/<pid>")
@@ -379,10 +444,14 @@ def qr_image(pid):
     product = _load_product(pid)
     if not product:
         return "Not found", 404
-    path = product["qr"]
+    path = product.get("qr", "")
+    if not path:
+        return "QR not ready yet", 404
     if _is_cloudinary_url(path):
         return redirect(path)
-    return send_file(path, mimetype="image/png")
+    if os.path.exists(path):
+        return send_file(path, mimetype="image/png")
+    return "Not ready yet", 404
 
 
 # ---------------------------------------------------------------------------
