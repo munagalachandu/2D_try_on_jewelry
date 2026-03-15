@@ -3,8 +3,8 @@
   "type": "earring_pair",
   "label": "Earring Pair",
   "name": "earring_pair1.png",
-  "processed": "C:\\Users\\Tanvi\\Documents\\jewelry\\2D_try_on_jewelry\\assets\\processed\\5cfe07e4\\raw_earring_pair.png",
-  "qr": "C:\\Users\\Tanvi\\Documents\\jewelry\\2D_try_on_jewelry\\assets\\processed\\5cfe07e4\\qr.png",
+  "processed": "https://res.cloudinary.com/dngnhjcuz/image/upload/v1773596146/jewelar/products/scbzsvf2om55tcid9hqh.png",
+  "qr": "https://res.cloudinary.com/dngnhjcuz/image/upload/v1773596147/jewelar/qr/qjbtx0fgkn36rifve2xg.png",
   "tryon_url": "http://192.168.1.36:5000/tryon/5cfe07e4",
   "created": "2026-03-15T19:31:36.250324"
 }
