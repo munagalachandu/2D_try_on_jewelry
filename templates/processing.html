@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JewelAR — Getting Ready</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:'Outfit',sans-serif;min-height:100vh;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(circle, rgba(59,28,91,1) 0%, rgba(10,3,16,1) 80%);
+    color:#D8BFD8;text-align:center;padding:2rem;
+  }
+  .logo{font-size:1.4rem;font-weight:700;color:#fff;margin-bottom:2rem;text-shadow:0 0 24px rgba(180,100,255,.6)}
+  .spinner{width:52px;height:52px;border:4px solid rgba(216,191,216,.1);border-top-color:#9b3ef0;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 1.5rem}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  h1{font-size:1.4rem;font-weight:700;color:#fff;margin-bottom:.5rem}
+  p{color:#9b7eb8;font-size:.9rem;max-width:320px}
+</style>
+</head>
+<body>
+  <div class="logo">✦ JewelAR</div>
+  <div class="spinner"></div>
+  <h1>Almost Ready!</h1>
+  <p>We're preparing your {{ product.label }} try-on experience. This page will refresh automatically.</p>
+<script>
+  // Auto-refresh every 5 seconds until product is ready
+  setInterval(async () => {
+    try {
+      const res  = await fetch(`/api/product-status/{{ product.id }}`);
+      const data = await res.json();
+      if (data.status === 'ready') {
+        window.location.reload();
+      }
+    } catch(e) {}
+  }, 5000);
+</script>
+</body>
+</html>
