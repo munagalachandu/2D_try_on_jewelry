@@ -28,6 +28,7 @@
   .tabs{display:flex;gap:.5rem;margin-bottom:1.5rem;background:rgba(10,3,16,.4);padding:.35rem;border-radius:99px;border:1px solid rgba(216,191,216,.1)}
   .tab{padding:.5rem 1.4rem;border-radius:99px;font-size:.88rem;font-weight:600;cursor:pointer;border:none;color:#9b7eb8;background:transparent;font-family:inherit;transition:all .2s}
   .tab.active{background:linear-gradient(135deg,#6a22b8,#9b3ef0);color:#fff;box-shadow:0 0 20px rgba(130,50,240,.4)}
+
   #panel-webcam{display:flex;flex-direction:column;align-items:center;width:100%}
   .ar-wrap{
     position:relative;border-radius:16px;overflow:hidden;
@@ -36,7 +37,8 @@
     box-shadow:0 0 60px rgba(90,30,180,.4),0 0 120px rgba(59,28,91,.4);
   }
   #input-video{display:none}
-  #output-canvas{width:100%;display:block}
+  /* Mirror the canvas via CSS so it looks like a selfie */
+  #output-canvas{width:100%;display:block;transform:scaleX(-1)}
   .stream-hint{
     position:absolute;bottom:.8rem;left:50%;transform:translateX(-50%);
     background:rgba(10,3,16,.8);color:#b89fc8;font-size:.75rem;
@@ -54,6 +56,7 @@
     padding:.4rem .8rem;text-align:center;
   }
   #cam-error{display:none;padding:3rem 2rem;text-align:center;color:#b89fc8;font-size:.88rem;line-height:1.8}
+
   #panel-photo{display:none;flex-direction:column;align-items:center;width:100%;max-width:600px}
   .drop{
     border:1.5px dashed rgba(180,100,255,.25);border-radius:14px;
@@ -131,7 +134,7 @@ const PID          = "{{ product.id }}";
 const PRODUCT_TYPE = "{{ product.type }}";
 const JEWELRY_URL  = "{{ product.processed }}";
 
-// Matches config.py exactly
+// Exactly matches config.py
 const CFG = {
   EARRING_Y_OFFSET_RATIO:  0.12,
   EARRING_X_OUTWARD_RATIO: 0.04,
@@ -140,7 +143,7 @@ const CFG = {
   NECKLACE_Y_OFFSET_RATIO: 0.50,
 };
 
-// Matches landmarks.py exactly
+// Exactly matches landmarks.py
 const LM = {
   LEFT_EAR:    132,
   RIGHT_EAR:   361,
@@ -156,11 +159,11 @@ const LM = {
 const debugBar = document.getElementById('debug-bar');
 
 // ---------------------------------------------------------------------------
-// Load jewelry + pre-split earring pair
+// Load jewelry image + pre-split earring pair
 // ---------------------------------------------------------------------------
-let jewelryImg = new Image();
-let earringL   = null;
-let earringR   = null;
+const jewelryImg = new Image();
+let earringL = null;
+let earringR = null;
 jewelryImg.crossOrigin = "anonymous";
 
 jewelryImg.onload = () => {
@@ -171,40 +174,39 @@ jewelryImg.onload = () => {
     const ih = jewelryImg.naturalHeight;
     earringL = document.createElement('canvas');
     earringR = document.createElement('canvas');
-    earringL.width = earringR.width = iw / 2;
+    earringL.width = earringR.width  = iw / 2;
     earringL.height = earringR.height = ih;
     earringL.getContext('2d').drawImage(jewelryImg,    0, 0, iw/2, ih, 0, 0, iw/2, ih);
     earringR.getContext('2d').drawImage(jewelryImg, iw/2, 0, iw/2, ih, 0, 0, iw/2, ih);
   }
 };
 jewelryImg.onerror = () => {
-  debugBar.textContent = `✗ Failed to load: ${JEWELRY_URL}`;
+  debugBar.textContent = `✗ Failed to load jewelry: ${JEWELRY_URL}`;
   debugBar.style.color = '#ff7070';
 };
 jewelryImg.src = JEWELRY_URL;
 
 // ---------------------------------------------------------------------------
-// Core draw: matches overlay.py overlay_image() exactly
-// cx,cy = centre of jewel, size = target width
+// Draw overlay — matches overlay.py overlay_image() exactly
+// cx,cy = centre, size = target width
 // ---------------------------------------------------------------------------
-function drawOverlay(ctx, img, cx, cy, size, angle) {
-  if (!img) return;
-  const srcW   = img.naturalWidth  || img.width;
-  const srcH   = img.naturalHeight || img.height;
-  if (!srcW || !srcH) return;
+function drawOverlay(ctx, img, cx, cy, size, angleDeg) {
+  const srcW = img.naturalWidth  || img.width;
+  const srcH = img.naturalHeight || img.height;
+  if (!srcW || !srcH || size <= 0) return;
   const targetW = size;
   const targetH = size * srcH / srcW;
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(angle * Math.PI / 180);
+  ctx.rotate(angleDeg * Math.PI / 180);
   ctx.drawImage(img, -targetW/2, -targetH/2, targetW, targetH);
   ctx.restore();
 }
 
 // ---------------------------------------------------------------------------
-// onResults — mirrors your Python _apply_overlay exactly
-// The key insight: MediaPipe gives normalized coords for the UNMIRRORED frame.
-// We draw the video mirrored (like a selfie), so we must mirror x coords too.
+// onResults — landmarks used as-is (no mirroring in JS)
+// Canvas is mirrored via CSS scaleX(-1) so it looks like a selfie
+// This exactly matches how your Python code works after cv2.flip(frame,1)
 // ---------------------------------------------------------------------------
 function onResults(results, canvas, video) {
   const W = video.videoWidth  || 640;
@@ -213,15 +215,11 @@ function onResults(results, canvas, video) {
   canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // Draw video mirrored (selfie view) — same as cv2.flip(frame,1) in Python
-  ctx.save();
-  ctx.translate(W, 0);
-  ctx.scale(-1, 1);
+  // Draw video frame normally — CSS mirrors the canvas
   ctx.drawImage(results.image, 0, 0, W, H);
-  ctx.restore();
 
   if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) {
-    debugBar.textContent = '👀 No face detected';
+    debugBar.textContent = '👀 No face detected — look at the camera';
     debugBar.style.color = '#ffcc70';
     return;
   }
@@ -233,9 +231,8 @@ function onResults(results, canvas, video) {
 
   const lms = results.multiFaceLandmarks[0];
 
-  // Helper: get pixel coords, mirroring x to match the flipped video
-  // This is exactly what your Python code does after cv2.flip(frame, 1)
-  function px(lm) { return (1 - lm.x) * W; }  // mirror x
+  // Landmarks as-is — exactly like your Python lm.x * w, lm.y * h
+  function px(lm) { return lm.x * W; }
   function py(lm) { return lm.y * H; }
 
   const leftEar    = [px(lms[LM.LEFT_EAR]),    py(lms[LM.LEFT_EAR])];
@@ -262,10 +259,9 @@ function onResults(results, canvas, video) {
   debugBar.style.color = '#80ffb0';
 
   if (PRODUCT_TYPE === 'earring_pair' && earringL && earringR) {
-    // Matches _apply_overlay earring_pair block exactly
-    const drop  = faceWidth * CFG.EARRING_Y_OFFSET_RATIO;
-    const out   = faceWidth * CFG.EARRING_X_OUTWARD_RATIO;
-    const size  = faceWidth * CFG.SCALE_FACTOR_EARRING;
+    const drop = faceWidth * CFG.EARRING_Y_OFFSET_RATIO;
+    const out  = faceWidth * CFG.EARRING_X_OUTWARD_RATIO;
+    const size = faceWidth * CFG.SCALE_FACTOR_EARRING;
 
     const lx = leftEar[0]  - out;
     const ly = leftEar[1]  + drop;
@@ -276,7 +272,6 @@ function onResults(results, canvas, video) {
     drawOverlay(ctx, earringR, rx, ry, size, tiltAngle);
 
   } else if (PRODUCT_TYPE === 'necklace') {
-    // Matches _apply_overlay necklace block exactly
     const size    = faceWidth * CFG.SCALE_FACTOR_NECKLACE;
     const drop    = faceWidth * CFG.NECKLACE_Y_OFFSET_RATIO;
     const jawMidX = (jawLeft[0] + jawRight[0]) / 2;
@@ -353,7 +348,7 @@ function switchTab(name, el) {
 }
 
 // ---------------------------------------------------------------------------
-// Photo upload (unchanged — works perfectly)
+// Photo upload — unchanged, works perfectly
 // ---------------------------------------------------------------------------
 function handleFile(input) {
   document.getElementById('file-name').textContent = input.files[0]?.name||'';
