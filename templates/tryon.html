@@ -51,7 +51,7 @@
   }
   #debug-bar{
     background:rgba(10,3,16,.7);color:#ffcc70;font-size:.72rem;
-    padding:.4rem .8rem;text-align:center;letter-spacing:.02em;
+    padding:.4rem .8rem;text-align:center;
   }
   #cam-error{display:none;padding:3rem 2rem;text-align:center;color:#b89fc8;font-size:.88rem;line-height:1.8}
   #panel-photo{display:none;flex-direction:column;align-items:center;width:100%;max-width:600px}
@@ -92,11 +92,11 @@
   </div>
 
   <div id="panel-webcam">
-    <div id="debug-bar">⏳ Loading jewelry image...</div>
+    <div id="debug-bar">⏳ Loading…</div>
     <div class="ar-wrap">
       <video id="input-video" autoplay playsinline muted></video>
       <canvas id="output-canvas"></canvas>
-      <div id="loading-msg">⏳ Starting AR camera… please wait</div>
+      <div id="loading-msg">⏳ Starting AR… please wait</div>
       <div id="cam-error">
         📷 Camera access denied.<br>Please allow camera and reload,<br>
         or use <strong>Upload Photo</strong> tab.
@@ -129,16 +129,9 @@
 <script>
 const PID          = "{{ product.id }}";
 const PRODUCT_TYPE = "{{ product.type }}";
-// Use the Cloudinary URL directly so CORS is not an issue
 const JEWELRY_URL  = "{{ product.processed }}";
 
-const IDX = {
-  LEFT_EAR:232, RIGHT_EAR:454,
-  LEFT_CHEEK:234, RIGHT_CHEEK:454,
-  CHIN:152, JAW_LEFT:172, JAW_RIGHT:397,
-  LEFT_EYE:33, RIGHT_EYE:263,
-};
-
+// Matches config.py exactly
 const CFG = {
   EARRING_Y_OFFSET_RATIO:  0.12,
   EARRING_X_OUTWARD_RATIO: 0.04,
@@ -147,63 +140,80 @@ const CFG = {
   NECKLACE_Y_OFFSET_RATIO: 0.50,
 };
 
+// Matches landmarks.py exactly
+const LM = {
+  LEFT_EAR:    132,
+  RIGHT_EAR:   361,
+  LEFT_CHEEK:  234,
+  RIGHT_CHEEK: 454,
+  CHIN:        152,
+  JAW_LEFT:    172,
+  JAW_RIGHT:   397,
+  LEFT_EYE:    33,
+  RIGHT_EYE:   263,
+};
+
+const debugBar = document.getElementById('debug-bar');
+
 // ---------------------------------------------------------------------------
-// Load jewelry image directly from Cloudinary URL (no CORS issue)
+// Load jewelry + pre-split earring pair
 // ---------------------------------------------------------------------------
-const debugBar   = document.getElementById('debug-bar');
-const jewelryImg = new Image();
+let jewelryImg = new Image();
+let earringL   = null;
+let earringR   = null;
 jewelryImg.crossOrigin = "anonymous";
 
 jewelryImg.onload = () => {
-  debugBar.textContent = `✓ Jewelry loaded (${jewelryImg.naturalWidth}x${jewelryImg.naturalHeight}px) — type: ${PRODUCT_TYPE}`;
+  debugBar.textContent = `✓ Jewelry ready (${jewelryImg.naturalWidth}x${jewelryImg.naturalHeight}) · ${PRODUCT_TYPE}`;
   debugBar.style.color = '#80ffb0';
-  // Pre-split earring pair
   if (PRODUCT_TYPE === 'earring_pair') {
     const iw = jewelryImg.naturalWidth;
     const ih = jewelryImg.naturalHeight;
     earringL = document.createElement('canvas');
     earringR = document.createElement('canvas');
-    earringL.width  = iw/2; earringL.height = ih;
-    earringR.width  = iw/2; earringR.height = ih;
+    earringL.width = earringR.width = iw / 2;
+    earringL.height = earringR.height = ih;
     earringL.getContext('2d').drawImage(jewelryImg,    0, 0, iw/2, ih, 0, 0, iw/2, ih);
     earringR.getContext('2d').drawImage(jewelryImg, iw/2, 0, iw/2, ih, 0, 0, iw/2, ih);
   }
 };
-
-jewelryImg.onerror = (e) => {
-  debugBar.textContent = `✗ Failed to load jewelry image from: ${JEWELRY_URL}`;
+jewelryImg.onerror = () => {
+  debugBar.textContent = `✗ Failed to load: ${JEWELRY_URL}`;
   debugBar.style.color = '#ff7070';
-  console.error('Jewelry load error:', e, JEWELRY_URL);
 };
-
 jewelryImg.src = JEWELRY_URL;
 
-let earringL = null;
-let earringR = null;
-
 // ---------------------------------------------------------------------------
-// Landmark helpers
+// Core draw: matches overlay.py overlay_image() exactly
+// cx,cy = centre of jewel, size = target width
 // ---------------------------------------------------------------------------
-function getLM(lms, idx, W, H) {
-  return [lms[idx].x * W, lms[idx].y * H];
-}
-function dist(a, b) {
-  return Math.hypot(a[0]-b[0], a[1]-b[1]);
-}
-
-// ---------------------------------------------------------------------------
-// Draw overlay on canvas
-// ---------------------------------------------------------------------------
-function drawImg(ctx, img, cx, cy, w, h) {
-  ctx.drawImage(img, cx - w/2, cy - h/2, w, h);
+function drawOverlay(ctx, img, cx, cy, size, angle) {
+  if (!img) return;
+  const srcW   = img.naturalWidth  || img.width;
+  const srcH   = img.naturalHeight || img.height;
+  if (!srcW || !srcH) return;
+  const targetW = size;
+  const targetH = size * srcH / srcW;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle * Math.PI / 180);
+  ctx.drawImage(img, -targetW/2, -targetH/2, targetW, targetH);
+  ctx.restore();
 }
 
+// ---------------------------------------------------------------------------
+// onResults — mirrors your Python _apply_overlay exactly
+// The key insight: MediaPipe gives normalized coords for the UNMIRRORED frame.
+// We draw the video mirrored (like a selfie), so we must mirror x coords too.
+// ---------------------------------------------------------------------------
 function onResults(results, canvas, video) {
-  const W = canvas.width  = video.videoWidth  || 640;
-  const H = canvas.height = video.videoHeight || 480;
+  const W = video.videoWidth  || 640;
+  const H = video.videoHeight || 480;
+  canvas.width  = W;
+  canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // Draw mirrored video
+  // Draw video mirrored (selfie view) — same as cv2.flip(frame,1) in Python
   ctx.save();
   ctx.translate(W, 0);
   ctx.scale(-1, 1);
@@ -211,91 +221,74 @@ function onResults(results, canvas, video) {
   ctx.restore();
 
   if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) {
-    debugBar.textContent = '👀 No face detected — look at the camera';
+    debugBar.textContent = '👀 No face detected';
     debugBar.style.color = '#ffcc70';
     return;
   }
 
-  if (!jewelryImg.complete || jewelryImg.naturalWidth === 0) {
-    debugBar.textContent = '⏳ Jewelry image still loading...';
+  if (!jewelryImg.complete || !jewelryImg.naturalWidth) {
+    debugBar.textContent = '⏳ Waiting for jewelry image…';
     return;
   }
 
   const lms = results.multiFaceLandmarks[0];
 
-  // All raw landmark coords (NOT mirrored yet — video is mirrored by CSS)
-  // Since we mirror the video draw, landmarks x coords need to be mirrored too
-  function mx(x) { return W - x * W; }
-  function py(y) { return y * H; }
+  // Helper: get pixel coords, mirroring x to match the flipped video
+  // This is exactly what your Python code does after cv2.flip(frame, 1)
+  function px(lm) { return (1 - lm.x) * W; }  // mirror x
+  function py(lm) { return lm.y * H; }
 
-  const leftEarX   = mx(lms[132].x);
-  const leftEarY   = py(lms[132].y);
-  const rightEarX  = mx(lms[361].x);
-  const rightEarY  = py(lms[361].y);
-  const leftCheekX = mx(lms[234].x);
-  const leftCheekY = py(lms[234].y);
-  const rightCheekX= mx(lms[454].x);
-  const rightCheekY= py(lms[454].y);
-  const chinX      = mx(lms[152].x);
-  const chinY      = py(lms[152].y);
-  const jawLeftX   = mx(lms[172].x);
-  const jawLeftY   = py(lms[172].y);
-  const jawRightX  = mx(lms[397].x);
-  const jawRightY  = py(lms[397].y);
-  const leftEyeX   = mx(lms[33].x);
-  const leftEyeY   = py(lms[33].y);
-  const rightEyeX  = mx(lms[263].x);
-  const rightEyeY  = py(lms[263].y);
+  const leftEar    = [px(lms[LM.LEFT_EAR]),    py(lms[LM.LEFT_EAR])];
+  const rightEar   = [px(lms[LM.RIGHT_EAR]),   py(lms[LM.RIGHT_EAR])];
+  const leftCheek  = [px(lms[LM.LEFT_CHEEK]),  py(lms[LM.LEFT_CHEEK])];
+  const rightCheek = [px(lms[LM.RIGHT_CHEEK]), py(lms[LM.RIGHT_CHEEK])];
+  const chin       = [px(lms[LM.CHIN]),         py(lms[LM.CHIN])];
+  const jawLeft    = [px(lms[LM.JAW_LEFT]),     py(lms[LM.JAW_LEFT])];
+  const jawRight   = [px(lms[LM.JAW_RIGHT]),    py(lms[LM.JAW_RIGHT])];
+  const leftEye    = [px(lms[LM.LEFT_EYE]),     py(lms[LM.LEFT_EYE])];
+  const rightEye   = [px(lms[LM.RIGHT_EYE]),    py(lms[LM.RIGHT_EYE])];
 
-  const faceWidth = Math.hypot(rightCheekX - leftCheekX, rightCheekY - leftCheekY);
-  const tiltAngle = Math.atan2(rightEyeY - leftEyeY, rightEyeX - leftEyeX);
+  const faceWidth = Math.hypot(
+    rightCheek[0] - leftCheek[0],
+    rightCheek[1] - leftCheek[1]
+  );
 
-  debugBar.textContent = `✓ Face detected — faceWidth: ${faceWidth.toFixed(0)}px`;
+  const tiltAngle = Math.atan2(
+    rightEye[1] - leftEye[1],
+    rightEye[0] - leftEye[0]
+  ) * 180 / Math.PI;
+
+  debugBar.textContent = `✓ Face · fw=${faceWidth.toFixed(0)}px · tilt=${tiltAngle.toFixed(1)}°`;
   debugBar.style.color = '#80ffb0';
 
-  ctx.save();
-
   if (PRODUCT_TYPE === 'earring_pair' && earringL && earringR) {
-    const drop = faceWidth * CFG.EARRING_Y_OFFSET_RATIO;
-    const out  = faceWidth * CFG.EARRING_X_OUTWARD_RATIO;
-    const size = faceWidth * CFG.SCALE_FACTOR_EARRING;
-    const aspect = jewelryImg.naturalHeight / (jewelryImg.naturalWidth / 2);
+    // Matches _apply_overlay earring_pair block exactly
+    const drop  = faceWidth * CFG.EARRING_Y_OFFSET_RATIO;
+    const out   = faceWidth * CFG.EARRING_X_OUTWARD_RATIO;
+    const size  = faceWidth * CFG.SCALE_FACTOR_EARRING;
 
-    // After mirror, left ear is on the left, right ear on the right
-    const lx = leftEarX  - out;
-    const ly = leftEarY  + drop;
-    const rx = rightEarX + out;
-    const ry = rightEarY + drop;
+    const lx = leftEar[0]  - out;
+    const ly = leftEar[1]  + drop;
+    const rx = rightEar[0] + out;
+    const ry = rightEar[1] + drop;
 
-    ctx.translate(lx, ly);
-    ctx.rotate(tiltAngle);
-    ctx.drawImage(earringL, -size/2, -size*aspect/2, size, size * aspect);
-    ctx.setTransform(1,0,0,1,0,0);
-
-    ctx.translate(rx, ry);
-    ctx.rotate(tiltAngle);
-    ctx.drawImage(earringR, -size/2, -size*aspect/2, size, size * aspect);
-    ctx.setTransform(1,0,0,1,0,0);
+    drawOverlay(ctx, earringL, lx, ly, size, tiltAngle);
+    drawOverlay(ctx, earringR, rx, ry, size, tiltAngle);
 
   } else if (PRODUCT_TYPE === 'necklace') {
-    const size   = faceWidth * CFG.SCALE_FACTOR_NECKLACE;
-    const drop   = faceWidth * CFG.NECKLACE_Y_OFFSET_RATIO;
-    const jawMidX= (jawLeftX + jawRightX) / 2;
-    const nx     = jawMidX;
-    const ny     = chinY + drop;
-    const aspect = jewelryImg.naturalHeight / jewelryImg.naturalWidth;
+    // Matches _apply_overlay necklace block exactly
+    const size    = faceWidth * CFG.SCALE_FACTOR_NECKLACE;
+    const drop    = faceWidth * CFG.NECKLACE_Y_OFFSET_RATIO;
+    const jawMidX = (jawLeft[0] + jawRight[0]) / 2;
+    const nx      = jawMidX;
+    const ny      = chin[1] + drop;
 
-    ctx.translate(nx, ny);
-    ctx.rotate(tiltAngle);
-    ctx.drawImage(jewelryImg, -size/2, -size*aspect/2, size, size * aspect);
-    ctx.setTransform(1,0,0,1,0,0);
+    drawOverlay(ctx, jewelryImg, nx, ny, size, tiltAngle);
   }
-
-  ctx.restore();
 }
 
 // ---------------------------------------------------------------------------
-// Start MediaPipe
+// Start/stop AR
 // ---------------------------------------------------------------------------
 let faceMesh = null;
 let camera   = null;
@@ -316,14 +309,12 @@ async function startAR() {
     faceMesh = new FaceMesh({ locateFile: f =>
       `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
     });
-
     faceMesh.setOptions({
       maxNumFaces: 1,
       refineLandmarks: false,
       minDetectionConfidence: 0.5,
       minTrackingConfidence:  0.5,
     });
-
     faceMesh.onResults(r => {
       loadMsg.style.display = 'none';
       onResults(r, canvas, video);
@@ -335,7 +326,7 @@ async function startAR() {
     });
     camera.start();
 
-  } catch (err) {
+  } catch(err) {
     loadMsg.style.display = 'none';
     errDiv.style.display  = 'block';
     debugBar.textContent  = `✗ Camera error: ${err.message}`;
@@ -356,16 +347,16 @@ function stopAR() {
 function switchTab(name, el) {
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('panel-webcam').style.display = name==='webcam' ? 'flex' : 'none';
-  document.getElementById('panel-photo').style.display  = name==='photo'  ? 'flex' : 'none';
+  document.getElementById('panel-webcam').style.display = name==='webcam'?'flex':'none';
+  document.getElementById('panel-photo').style.display  = name==='photo' ?'flex':'none';
   if (name==='webcam') startAR(); else stopAR();
 }
 
 // ---------------------------------------------------------------------------
-// Photo upload
+// Photo upload (unchanged — works perfectly)
 // ---------------------------------------------------------------------------
 function handleFile(input) {
-  document.getElementById('file-name').textContent = input.files[0]?.name || '';
+  document.getElementById('file-name').textContent = input.files[0]?.name||'';
 }
 
 async function uploadPhoto() {
@@ -379,14 +370,14 @@ async function uploadPhoto() {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(()=>controller.abort(), 120000);
-    const res  = await fetch(`/tryon-image/${PID}`, {method:'POST',body:fd,signal:controller.signal});
+    const res  = await fetch(`/tryon-image/${PID}`,{method:'POST',body:fd,signal:controller.signal});
     clearTimeout(timeout);
     const data = await res.json();
     document.getElementById('spinner').style.display    = 'none';
     document.getElementById('status-msg').style.display = 'none';
     if (data.result_url) {
-      document.getElementById('result-img').src     = data.result_url+'?t='+Date.now();
-      document.getElementById('dl-btn').href        = `/download/${PID}`;
+      document.getElementById('result-img').src  = data.result_url+'?t='+Date.now();
+      document.getElementById('dl-btn').href     = `/download/${PID}`;
       document.getElementById('result-section').style.display = 'flex';
     } else {
       alert('Try-on failed: '+(data.error||'Unknown error'));
@@ -394,19 +385,17 @@ async function uploadPhoto() {
   } catch(err) {
     document.getElementById('spinner').style.display    = 'none';
     document.getElementById('status-msg').style.display = 'none';
-    alert(err.name==='AbortError' ? 'Timed out. Please try again.' : 'Something went wrong.');
+    alert(err.name==='AbortError'?'Timed out. Please try again.':'Something went wrong.');
   }
 }
 
 function resetPhoto() {
-  document.getElementById('faceFile').value = '';
-  document.getElementById('file-name').textContent = '';
-  document.getElementById('result-section').style.display = 'none';
+  document.getElementById('faceFile').value='';
+  document.getElementById('file-name').textContent='';
+  document.getElementById('result-section').style.display='none';
 }
 
-// ---------------------------------------------------------------------------
 // Auto start
-// ---------------------------------------------------------------------------
 startAR();
 </script>
 </body>
