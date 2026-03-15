@@ -40,7 +40,7 @@
     <h1>Upload Jewelry</h1>
     <p class="sub">Upload product images — backgrounds are removed automatically.</p>
     <form method="POST" action="/seller/upload" enctype="multipart/form-data">
-      {% for field, icon, label in [('earring_pair','💍','Earring Pair'), ('necklace','📿','Necklace'), ('spectacles','🕶️','Spectacles')] %}
+      {% for field, icon, label in [('earring_pair','💍','Earring Pair'), ('necklace','📿','Necklace')] %}
       <div class="field">
         <label>{{ icon }} {{ label }} <span class="badge">optional</span></label>
         <div class="drop" id="drop-{{ field }}">

@@ -103,18 +103,6 @@ def _apply_overlay(frame: np.ndarray, product: dict, data: dict,
             ny += drop
         overlay_image(frame, img, int(nx), int(ny), int(size), tilt)
 
-    elif ptype == "spectacles":
-        le = data.get("left_eye_outer")
-        re = data.get("right_eye_outer")
-        if le and re:
-            cx = (le[0] + re[0]) // 2
-            cy = (le[1] + re[1]) // 2
-            eye_span = data.get("eye_span", fw * 0.45)
-            size = int(eye_span * 1.15)
-            if smoothers:
-                cx, cy, size = smoothers["n"].smooth(cx, cy, size)
-            overlay_image(frame, img, int(cx), int(cy), int(size), tilt)
-
 
 # ---------------------------------------------------------------------------
 # Webcam helper
@@ -182,7 +170,6 @@ def upload():
     product_fields = {
         "earring_pair": ("earring_pair.png", "Earring Pair"),
         "necklace":     ("necklace.png",     "Necklace"),
-        "spectacles":   ("spectacles.png",   "Spectacles"),
     }
     created = 0
     for field, (filename, label) in product_fields.items():
@@ -310,4 +297,4 @@ if __name__ == "__main__":
     ip = _local_ip()
     print(f"\n  Seller → http://{ip}:5000/seller")
     print(f"  Dashboard → http://{ip}:5000/seller/dashboard\n")
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
