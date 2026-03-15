@@ -39,6 +39,7 @@
   .card-img{width:100%;height:180px;object-fit:contain;background:rgba(10,3,16,.5);padding:1rem}
   .card-body{padding:1.2rem}
   .badge{display:inline-block;background:rgba(59,28,91,.8);border:1px solid rgba(216,191,216,.18);color:#c8a8e0;font-size:.7rem;padding:.15rem .5rem;border-radius:99px;margin-bottom:.6rem;text-transform:uppercase;letter-spacing:.06em}
+  .badge-processing{background:rgba(91,60,10,.8);border-color:rgba(255,180,50,.3);color:#ffcc70}
   .card-name{font-size:.9rem;color:#D8BFD8;margin-bottom:1rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .qr-wrap{text-align:center;margin-bottom:1rem}
   .qr-wrap img{width:120px;height:120px;border:2px solid rgba(180,100,255,.3);border-radius:10px;background:#fff;padding:4px;box-shadow:0 0 20px rgba(120,50,220,.3)}
@@ -48,6 +49,17 @@
   .btn-purple{background:linear-gradient(135deg,#6a22b8,#9b3ef0);color:#fff;box-shadow:0 0 16px rgba(120,50,220,.35)}
   .btn-outline{background:transparent;border:1px solid rgba(216,191,216,.18);color:#b89fc8}
   .btn:hover{opacity:.82}
+  .btn-disabled{opacity:.4;pointer-events:none;background:rgba(59,28,91,.5);color:#9b7eb8;border:1px solid rgba(216,191,216,.1)}
+
+  /* Processing state */
+  .processing-overlay{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    height:180px;background:rgba(10,3,16,.5);gap:.8rem;
+  }
+  .spinner{width:32px;height:32px;border:3px solid rgba(216,191,216,.1);border-top-color:#ffcc70;border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .processing-text{font-size:.8rem;color:#ffcc70;text-align:center;padding:0 1rem}
+
   footer{text-align:center;padding:1.2rem;color:#3a2050;font-size:.78rem}
 </style>
 </head>
@@ -68,20 +80,42 @@
   {% else %}
   <div class="grid">
     {% for p in products %}
-    <div class="card">
-      <img class="card-img" src="/product-image/{{ p.id }}" alt="{{ p.label }}"
-           onerror="this.style.padding='3rem';this.style.opacity='.3'">
+    <div class="card" id="card-{{ p.id }}">
+      {% if p.get('status') == 'processing' %}
+        <div class="processing-overlay">
+          <div class="spinner"></div>
+          <p class="processing-text">Removing background…<br>usually takes 20–30 sec</p>
+        </div>
+      {% else %}
+        <img class="card-img" src="/product-image/{{ p.id }}" alt="{{ p.label }}"
+             onerror="this.style.padding='3rem';this.style.opacity='.3'">
+      {% endif %}
       <div class="card-body">
-        <span class="badge">{{ p.label }}</span>
+        {% if p.get('status') == 'processing' %}
+          <span class="badge badge-processing">⏳ Processing</span>
+        {% else %}
+          <span class="badge">{{ p.label }}</span>
+        {% endif %}
         <div class="card-name">{{ p.name }}</div>
-        <div class="qr-wrap">
-          <img src="/qr/{{ p.id }}" alt="QR Code">
-          <div class="qr-url">{{ p.tryon_url }}</div>
-        </div>
-        <div class="actions">
-          <a class="btn btn-purple" href="{{ p.tryon_url }}" target="_blank">Try On</a>
-          <a class="btn btn-outline" href="/qr/{{ p.id }}" download="qr_{{ p.id }}.png">QR ↓</a>
-        </div>
+
+        {% if p.get('status') == 'processing' %}
+          <div class="qr-wrap" style="color:#6a4a80;font-size:.8rem;padding:1rem 0">
+            QR code will appear when ready
+          </div>
+          <div class="actions">
+            <span class="btn btn-disabled">Try On</span>
+            <span class="btn btn-disabled">QR ↓</span>
+          </div>
+        {% else %}
+          <div class="qr-wrap">
+            <img src="/qr/{{ p.id }}" alt="QR Code">
+            <div class="qr-url">{{ p.tryon_url }}</div>
+          </div>
+          <div class="actions">
+            <a class="btn btn-purple" href="{{ p.tryon_url }}" target="_blank">Try On</a>
+            <a class="btn btn-outline" href="/qr/{{ p.id }}" download="qr_{{ p.id }}.png">QR ↓</a>
+          </div>
+        {% endif %}
       </div>
     </div>
     {% endfor %}
@@ -89,5 +123,32 @@
   {% endif %}
 </main>
 <footer>JewelAR Virtual Try-On Platform</footer>
+
+<script>
+// Poll any cards that are still processing
+const processingIds = [
+  {% for p in products %}
+    {% if p.get('status') == 'processing' %}"{{ p.id }}",{% endif %}
+  {% endfor %}
+];
+
+function pollProduct(pid) {
+  const interval = setInterval(async () => {
+    try {
+      const res  = await fetch(`/api/product-status/${pid}`);
+      const data = await res.json();
+      if (data.status === 'ready') {
+        clearInterval(interval);
+        // Reload the page so the card renders properly
+        window.location.reload();
+      }
+    } catch(e) {
+      // silently ignore network errors and keep polling
+    }
+  }, 4000); // poll every 4 seconds
+}
+
+processingIds.forEach(pid => pollProduct(pid));
+</script>
 </body>
 </html>
