@@ -3,8 +3,8 @@
   "type": "necklace",
   "label": "Necklace",
   "name": "necklace2.png",
-  "processed": "C:\\Users\\Tanvi\\Documents\\jewelry\\2D_try_on_jewelry\\assets\\processed\\bbfac0ac\\raw_necklace.png",
-  "qr": "C:\\Users\\Tanvi\\Documents\\jewelry\\2D_try_on_jewelry\\assets\\processed\\bbfac0ac\\qr.png",
+  "processed": "https://res.cloudinary.com/dngnhjcuz/image/upload/v1773596155/jewelar/products/nnrqqxhyoznsdmp3grwt.png",
+  "qr": "https://res.cloudinary.com/dngnhjcuz/image/upload/v1773596155/jewelar/qr/whmwbhmgioqmzcke7yw6.png",
   "tryon_url": "http://192.168.1.36:5000/tryon/bbfac0ac",
   "created": "2026-03-15T19:12:35.502555"
 }
