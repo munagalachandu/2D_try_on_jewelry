@@ -28,6 +28,7 @@
   .tab{padding:.5rem 1.4rem;border-radius:99px;font-size:.88rem;font-weight:600;cursor:pointer;border:none;color:#9b7eb8;background:transparent;font-family:inherit;transition:all .2s}
   .tab.active{background:linear-gradient(135deg,#6a22b8,#9b3ef0);color:#fff;box-shadow:0 0 20px rgba(130,50,240,.4)}
 
+  /* Webcam */
   #panel-webcam{display:flex;flex-direction:column;align-items:center;width:100%}
   .stream-wrap{
     position:relative;border-radius:16px;overflow:hidden;
@@ -36,9 +37,21 @@
     max-width:640px;width:100%;
     box-shadow:0 0 60px rgba(90,30,180,.4),0 0 120px rgba(59,28,91,.4);
   }
-  .stream-wrap img{width:100%;display:block}
-  .stream-hint{position:absolute;bottom:.8rem;left:50%;transform:translateX(-50%);background:rgba(10,3,16,.8);color:#b89fc8;font-size:.75rem;padding:.3rem .8rem;border-radius:99px;white-space:nowrap;pointer-events:none;border:1px solid rgba(216,191,216,.1)}
+  #webcam-video{width:100%;display:block;transform:scaleX(-1)}
+  #webcam-canvas{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1)}
+  .stream-hint{
+    position:absolute;bottom:.8rem;left:50%;transform:translateX(-50%);
+    background:rgba(10,3,16,.8);color:#b89fc8;font-size:.75rem;
+    padding:.3rem .8rem;border-radius:99px;white-space:nowrap;
+    pointer-events:none;border:1px solid rgba(216,191,216,.1);
+    z-index:10;
+  }
+  #cam-error{
+    display:none;padding:3rem 2rem;text-align:center;color:#b89fc8;font-size:.88rem;line-height:1.6
+  }
+  .capture-btn-wrap{margin-top:1rem}
 
+  /* Photo */
   #panel-photo{display:none;flex-direction:column;align-items:center;width:100%;max-width:600px}
   .drop{
     border:1.5px dashed rgba(180,100,255,.25);border-radius:14px;
@@ -63,7 +76,6 @@
 
   #spinner{display:none;margin:2rem auto;width:40px;height:40px;border:3px solid rgba(216,191,216,.1);border-top-color:#9b3ef0;border-radius:50%;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
-
   #status-msg{display:none;color:#b89fc8;font-size:.83rem;text-align:center;margin-top:.6rem}
 
   footer{text-align:center;padding:1rem;color:#3a2050;font-size:.75rem;margin-top:auto}
@@ -86,8 +98,28 @@
   <!-- Webcam panel -->
   <div id="panel-webcam">
     <div class="stream-wrap">
-      <img src="/stream/{{ product.id }}" alt="Live Try-On">
+      <video id="webcam-video" autoplay playsinline muted></video>
+      <canvas id="webcam-canvas"></canvas>
       <span class="stream-hint">Live · Move closer for best results</span>
+      <div id="cam-error">
+        📷 Camera not available or permission denied.<br>
+        Please allow camera access and reload the page,<br>
+        or use the <strong>Upload Photo</strong> tab instead.
+      </div>
+    </div>
+    <div class="capture-btn-wrap">
+      <button class="btn btn-purple" id="capture-btn" onclick="captureAndTryOn()" style="margin-top:1rem">
+        📸 Capture &amp; Try On
+      </button>
+    </div>
+    <div id="webcam-spinner" style="display:none;margin:1.5rem auto;width:36px;height:36px;border:3px solid rgba(216,191,216,.1);border-top-color:#9b3ef0;border-radius:50%;animation:spin .8s linear infinite"></div>
+    <p id="webcam-status-msg" style="display:none;color:#b89fc8;font-size:.83rem;text-align:center;margin-top:.6rem">Processing… ⏳</p>
+    <div id="webcam-result-section" style="display:none;flex-direction:column;align-items:center;margin-top:1.5rem;width:100%;max-width:640px">
+      <img id="webcam-result-img" src="" alt="Try-On Result" style="max-width:100%;border-radius:14px;border:1.5px solid rgba(180,100,255,.3);margin-bottom:1rem;box-shadow:0 0 40px rgba(90,30,180,.3)">
+      <div class="actions">
+        <a id="webcam-dl-btn" class="btn btn-purple" href="#" download="tryon_result.jpg">⬇ Download Result</a>
+        <button class="btn btn-outline" onclick="resetWebcam()">Try Again</button>
+      </div>
     </div>
   </div>
 
@@ -115,15 +147,115 @@
 
 <script>
 const PID = "{{ product.id }}";
+let webcamStream = null;
+
+// ---------------------------------------------------------------------------
+// Webcam
+// ---------------------------------------------------------------------------
+
+async function startWebcam() {
+  const video  = document.getElementById('webcam-video');
+  const errDiv = document.getElementById('cam-error');
+  try {
+    webcamStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    video.srcObject = webcamStream;
+    video.style.display = 'block';
+    errDiv.style.display = 'none';
+  } catch (err) {
+    video.style.display = 'none';
+    errDiv.style.display = 'block';
+    document.getElementById('capture-btn').style.display = 'none';
+    console.error('Camera error:', err);
+  }
+}
+
+function stopWebcam() {
+  if (webcamStream) {
+    webcamStream.getTracks().forEach(t => t.stop());
+    webcamStream = null;
+  }
+}
+
+async function captureAndTryOn() {
+  const video  = document.getElementById('webcam-video');
+  const canvas = document.getElementById('webcam-canvas');
+
+  // Capture frame from video
+  canvas.width  = video.videoWidth  || 640;
+  canvas.height = video.videoHeight || 480;
+  const ctx = canvas.getContext('2d');
+  // Draw mirrored so it matches what user sees
+  ctx.translate(canvas.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  ctx.setTransform(1,0,0,1,0,0);
+
+  // Convert canvas to blob and send to server
+  canvas.toBlob(async (blob) => {
+    if (!blob) { alert('Could not capture frame.'); return; }
+
+    document.getElementById('webcam-spinner').style.display = 'block';
+    document.getElementById('webcam-status-msg').style.display = 'block';
+    document.getElementById('webcam-result-section').style.display = 'none';
+
+    const fd = new FormData();
+    fd.append('face', blob, 'capture.jpg');
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120000);
+      const res = await fetch(`/tryon-image/${PID}`, {
+        method: 'POST',
+        body: fd,
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      const data = await res.json();
+
+      document.getElementById('webcam-spinner').style.display = 'none';
+      document.getElementById('webcam-status-msg').style.display = 'none';
+
+      if (data.result_url) {
+        document.getElementById('webcam-result-img').src = data.result_url + '?t=' + Date.now();
+        document.getElementById('webcam-dl-btn').href = `/download/${PID}`;
+        document.getElementById('webcam-result-section').style.display = 'flex';
+      } else {
+        alert('Try-on failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      document.getElementById('webcam-spinner').style.display = 'none';
+      document.getElementById('webcam-status-msg').style.display = 'none';
+      alert(err.name === 'AbortError' ? 'Timed out. Please try again.' : 'Something went wrong.');
+    }
+  }, 'image/jpeg', 0.92);
+}
+
+function resetWebcam() {
+  document.getElementById('webcam-result-section').style.display = 'none';
+}
+
+// ---------------------------------------------------------------------------
+// Tab switching
+// ---------------------------------------------------------------------------
 
 function switchTab(name, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('panel-webcam').style.display = name === 'webcam' ? 'flex' : 'none';
   document.getElementById('panel-photo').style.display  = name === 'photo'  ? 'flex' : 'none';
-  const img = document.querySelector('#panel-webcam img');
-  img.src = name === 'webcam' ? `/stream/${PID}` : '';
+  if (name === 'webcam') {
+    startWebcam();
+  } else {
+    stopWebcam();
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Photo upload
+// ---------------------------------------------------------------------------
 
 function handleFile(input) {
   document.getElementById('file-name').textContent = input.files[0]?.name || '';
@@ -142,15 +274,15 @@ async function uploadPhoto() {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+    const timeout = setTimeout(() => controller.abort(), 120000);
     const res = await fetch(`/tryon-image/${PID}`, {
       method: 'POST',
       body: fd,
       signal: controller.signal
     });
     clearTimeout(timeout);
-
     const data = await res.json();
+
     document.getElementById('spinner').style.display = 'none';
     document.getElementById('status-msg').style.display = 'none';
 
@@ -164,11 +296,7 @@ async function uploadPhoto() {
   } catch (err) {
     document.getElementById('spinner').style.display = 'none';
     document.getElementById('status-msg').style.display = 'none';
-    if (err.name === 'AbortError') {
-      alert('Request timed out. Please try again.');
-    } else {
-      alert('Something went wrong. Please try again.');
-    }
+    alert(err.name === 'AbortError' ? 'Timed out. Please try again.' : 'Something went wrong.');
   }
 }
 
@@ -177,6 +305,11 @@ function resetPhoto() {
   document.getElementById('file-name').textContent = '';
   document.getElementById('result-section').style.display = 'none';
 }
+
+// ---------------------------------------------------------------------------
+// Start webcam on load
+// ---------------------------------------------------------------------------
+startWebcam();
 </script>
 </body>
 </html>
