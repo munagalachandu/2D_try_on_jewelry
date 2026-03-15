@@ -11,10 +11,8 @@ from flask import (Flask, render_template, request, redirect,
                    url_for, Response, send_file, jsonify)
 
 import config
-from landmarks import get_face_landmarks
 from overlay   import load_overlay, overlay_image, split_pair
 from smoother  import PositionSmoother
-from preprocess import remove_bg
 from qr_generator import generate_qr
 
 app = Flask(__name__)
@@ -22,6 +20,27 @@ app = Flask(__name__)
 SESSIONS_DIR  = os.path.join(os.path.dirname(__file__), "sessions")
 os.makedirs(SESSIONS_DIR,       exist_ok=True)
 os.makedirs(config.PROCESSED_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Lazy loaders — so Flask binds its port before heavy models load
+# ---------------------------------------------------------------------------
+
+_get_face_landmarks_fn = None
+_remove_bg_fn = None
+
+def get_face_landmarks(frame):
+    global _get_face_landmarks_fn
+    if _get_face_landmarks_fn is None:
+        from landmarks import get_face_landmarks as _fn
+        _get_face_landmarks_fn = _fn
+    return _get_face_landmarks_fn(frame)
+
+def remove_bg(raw_path, prod_dir):
+    global _remove_bg_fn
+    if _remove_bg_fn is None:
+        from preprocess import remove_bg as _fn
+        _remove_bg_fn = _fn
+    return _remove_bg_fn(raw_path, prod_dir)
 
 # ---------------------------------------------------------------------------
 # Utilities
@@ -166,7 +185,7 @@ def seller():
 
 @app.route("/seller/upload", methods=["POST"])
 def upload():
-    base_url = f"http://{_local_ip()}:5000"
+    base_url = request.host_url.rstrip("/")
     product_fields = {
         "earring_pair": ("earring_pair.png", "Earring Pair"),
         "necklace":     ("necklace.png",     "Necklace"),
@@ -294,7 +313,8 @@ def qr_image(pid):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    port = int(os.environ.get('PORT', 10000))
     ip = _local_ip()
-    print(f"\n  Seller → http://{ip}:5000/seller")
-    print(f"  Dashboard → http://{ip}:5000/seller/dashboard\n")
-    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)
+    print(f"\n  Seller → http://{ip}:{port}/seller")
+    print(f"  Dashboard → http://{ip}:{port}/seller/dashboard\n")
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
