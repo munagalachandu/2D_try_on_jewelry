@@ -9,6 +9,8 @@ import cv2
 import numpy as np
 from flask import (Flask, render_template, request, redirect,
                    url_for, Response, send_file, jsonify)
+import cloudinary
+import cloudinary.uploader
 
 import config
 from overlay   import load_overlay, overlay_image, split_pair
@@ -17,9 +19,15 @@ from qr_generator import generate_qr
 
 app = Flask(__name__)
 
-SESSIONS_DIR  = os.path.join(os.path.dirname(__file__), "sessions")
-os.makedirs(SESSIONS_DIR,       exist_ok=True)
+SESSIONS_DIR = os.path.join(os.path.dirname(__file__), "sessions")
+os.makedirs(SESSIONS_DIR,         exist_ok=True)
 os.makedirs(config.PROCESSED_DIR, exist_ok=True)
+
+cloudinary.config(
+    cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME"),
+    api_key    = os.environ.get("CLOUDINARY_API_KEY"),
+    api_secret = os.environ.get("CLOUDINARY_API_SECRET"),
+)
 
 # ---------------------------------------------------------------------------
 # Lazy loaders — so Flask binds its port before heavy models load
@@ -82,15 +90,53 @@ def _all_products() -> list[dict]:
     return products
 
 
+def _is_cloudinary_url(path: str) -> bool:
+    return path.startswith("http://") or path.startswith("https://")
+
+
+def _upload_qr_to_cloudinary(qr_path: str, pid: str) -> str:
+    """Upload a local QR PNG to Cloudinary and return the URL, or local path on failure."""
+    cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME")
+    if not cloud_name:
+        return qr_path
+    try:
+        result = cloudinary.uploader.upload(
+            qr_path,
+            folder="jewelar_qr",
+            public_id=f"qr_{pid}",
+            overwrite=True,
+            resource_type="image",
+        )
+        return result.get("secure_url", qr_path)
+    except Exception as e:
+        print(f"  ⚠  Cloudinary QR upload failed: {e}")
+        return qr_path
+
+
 # ---------------------------------------------------------------------------
 # Overlay helper — shared by MJPEG stream and static-image try-on
 # ---------------------------------------------------------------------------
+
+def _load_overlay_any(path: str):
+    """Load overlay from a Cloudinary URL or local path."""
+    if _is_cloudinary_url(path):
+        import urllib.request, tempfile
+        try:
+            ext = ".png"
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                urllib.request.urlretrieve(path, tmp.name)
+                return load_overlay(tmp.name)
+        except Exception as e:
+            print(f"[overlay] Failed to fetch {path}: {e}")
+            return None
+    return load_overlay(path)
+
 
 def _apply_overlay(frame: np.ndarray, product: dict, data: dict,
                    smoothers: dict | None = None):
     """Apply jewelry overlay for *product* onto *frame* (in-place)."""
     ptype = product["type"]
-    img   = load_overlay(product["processed"])
+    img   = _load_overlay_any(product["processed"])
     if img is None:
         return
 
@@ -203,19 +249,21 @@ def upload():
         raw_path = os.path.join(prod_dir, f"raw_{filename}")
         f.save(raw_path)
 
-        processed_path = remove_bg(raw_path, prod_dir)
+        # remove_bg now returns a Cloudinary URL (or local path as fallback)
+        processed_url = remove_bg(raw_path, prod_dir)
 
         tryon_url = f"{base_url}/tryon/{pid}"
         qr_path   = os.path.join(prod_dir, "qr.png")
         generate_qr(tryon_url, qr_path)
+        qr_url = _upload_qr_to_cloudinary(qr_path, pid)
 
         _save_product(pid, {
             "id":        pid,
             "type":      field,
             "label":     label,
             "name":      f.filename,
-            "processed": processed_path,
-            "qr":        qr_path,
+            "processed": processed_url,   # Cloudinary URL or local path
+            "qr":        qr_url,          # Cloudinary URL or local path
             "tryon_url": tryon_url,
             "created":   datetime.now().isoformat(),
         })
@@ -271,6 +319,7 @@ def tryon_image(pid):
         _apply_overlay(frame, product, data)
 
     result_path = os.path.join(config.PROCESSED_DIR, pid, "result.jpg")
+    os.makedirs(os.path.dirname(result_path), exist_ok=True)
     cv2.imwrite(result_path, frame)
     return jsonify(result_url=f"/preview/{pid}")
 
@@ -297,7 +346,10 @@ def product_image(pid):
     product = _load_product(pid)
     if not product:
         return "Not found", 404
-    return send_file(product["processed"], mimetype="image/png")
+    path = product["processed"]
+    if _is_cloudinary_url(path):
+        return redirect(path)
+    return send_file(path, mimetype="image/png")
 
 
 @app.route("/qr/<pid>")
@@ -305,7 +357,10 @@ def qr_image(pid):
     product = _load_product(pid)
     if not product:
         return "Not found", 404
-    return send_file(product["qr"], mimetype="image/png")
+    path = product["qr"]
+    if _is_cloudinary_url(path):
+        return redirect(path)
+    return send_file(path, mimetype="image/png")
 
 
 # ---------------------------------------------------------------------------
