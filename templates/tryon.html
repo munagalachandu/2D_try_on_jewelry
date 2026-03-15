@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>JewelAR — Try On</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
   *{box-sizing:border-box;margin:0;padding:0}
@@ -23,61 +25,56 @@
   main{flex:1;display:flex;flex-direction:column;align-items:center;padding:2rem 1rem}
   h1{font-size:1.5rem;font-weight:700;color:#fff;margin-bottom:.3rem;text-align:center;text-shadow:0 0 20px rgba(200,130,255,.5)}
   .sub{color:#9b7eb8;font-size:.87rem;margin-bottom:1.8rem;text-align:center}
-
   .tabs{display:flex;gap:.5rem;margin-bottom:1.5rem;background:rgba(10,3,16,.4);padding:.35rem;border-radius:99px;border:1px solid rgba(216,191,216,.1)}
   .tab{padding:.5rem 1.4rem;border-radius:99px;font-size:.88rem;font-weight:600;cursor:pointer;border:none;color:#9b7eb8;background:transparent;font-family:inherit;transition:all .2s}
   .tab.active{background:linear-gradient(135deg,#6a22b8,#9b3ef0);color:#fff;box-shadow:0 0 20px rgba(130,50,240,.4)}
-
-  /* Webcam */
   #panel-webcam{display:flex;flex-direction:column;align-items:center;width:100%}
-  .stream-wrap{
+  .ar-wrap{
     position:relative;border-radius:16px;overflow:hidden;
     border:1.5px solid rgba(180,100,255,.3);
-    background:#0A0310;
-    max-width:640px;width:100%;
+    background:#0A0310;max-width:640px;width:100%;
     box-shadow:0 0 60px rgba(90,30,180,.4),0 0 120px rgba(59,28,91,.4);
   }
-  #webcam-video{width:100%;display:block;transform:scaleX(-1)}
-  #webcam-canvas{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1)}
+  #input-video{display:none}
+  #output-canvas{width:100%;display:block}
   .stream-hint{
     position:absolute;bottom:.8rem;left:50%;transform:translateX(-50%);
     background:rgba(10,3,16,.8);color:#b89fc8;font-size:.75rem;
     padding:.3rem .8rem;border-radius:99px;white-space:nowrap;
-    pointer-events:none;border:1px solid rgba(216,191,216,.1);
-    z-index:10;
+    pointer-events:none;border:1px solid rgba(216,191,216,.1);z-index:10;
   }
-  #cam-error{
-    display:none;padding:3rem 2rem;text-align:center;color:#b89fc8;font-size:.88rem;line-height:1.6
+  #loading-msg{
+    position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:rgba(10,3,16,.85);color:#b89fc8;font-size:.85rem;
+    padding:.8rem 1.4rem;border-radius:12px;text-align:center;
+    border:1px solid rgba(216,191,216,.1);z-index:20;width:80%;
   }
-  .capture-btn-wrap{margin-top:1rem}
-
-  /* Photo */
+  #debug-bar{
+    background:rgba(10,3,16,.7);color:#ffcc70;font-size:.72rem;
+    padding:.4rem .8rem;text-align:center;letter-spacing:.02em;
+  }
+  #cam-error{display:none;padding:3rem 2rem;text-align:center;color:#b89fc8;font-size:.88rem;line-height:1.8}
   #panel-photo{display:none;flex-direction:column;align-items:center;width:100%;max-width:600px}
   .drop{
     border:1.5px dashed rgba(180,100,255,.25);border-radius:14px;
     padding:2.5rem;text-align:center;cursor:pointer;
     transition:border-color .2s,background .2s,box-shadow .2s;
-    position:relative;width:100%;margin-bottom:1rem;
-    background:rgba(45,17,69,.3);
+    position:relative;width:100%;margin-bottom:1rem;background:rgba(45,17,69,.3);
   }
   .drop:hover{border-color:rgba(200,130,255,.6);background:rgba(59,28,91,.35);box-shadow:0 0 24px rgba(150,60,255,.2)}
   .drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
   .drop .icon{font-size:2.2rem;margin-bottom:.5rem}
   .drop p{color:#6a4a80;font-size:.85rem}
-
   .btn{padding:.75rem 2rem;font-size:.92rem;font-weight:700;border:none;border-radius:10px;cursor:pointer;font-family:inherit;transition:opacity .2s,box-shadow .2s}
   .btn-purple{background:linear-gradient(135deg,#6a22b8,#9b3ef0);color:#fff;box-shadow:0 0 24px rgba(130,50,240,.4)}
   .btn-outline{background:transparent;border:1.5px solid rgba(216,191,216,.15);color:#b89fc8}
   .btn:hover{opacity:.82}
-
   #result-section{display:none;flex-direction:column;align-items:center;margin-top:1.5rem;width:100%}
   #result-img{max-width:100%;border-radius:14px;border:1.5px solid rgba(180,100,255,.3);margin-bottom:1rem;box-shadow:0 0 40px rgba(90,30,180,.3)}
   .actions{display:flex;gap:.8rem;justify-content:center;flex-wrap:wrap}
-
   #spinner{display:none;margin:2rem auto;width:40px;height:40px;border:3px solid rgba(216,191,216,.1);border-top-color:#9b3ef0;border-radius:50%;animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   #status-msg{display:none;color:#b89fc8;font-size:.83rem;text-align:center;margin-top:.6rem}
-
   footer{text-align:center;padding:1rem;color:#3a2050;font-size:.75rem;margin-top:auto}
 </style>
 </head>
@@ -89,41 +86,25 @@
 <main>
   <h1>Try On</h1>
   <p class="sub">{{ product.label }} — {{ product.name }}</p>
-
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('webcam',this)">📷 Live Webcam</button>
+    <button class="tab active" onclick="switchTab('webcam',this)">💎 Live AR</button>
     <button class="tab"        onclick="switchTab('photo',this)">🖼️ Upload Photo</button>
   </div>
 
-  <!-- Webcam panel -->
   <div id="panel-webcam">
-    <div class="stream-wrap">
-      <video id="webcam-video" autoplay playsinline muted></video>
-      <canvas id="webcam-canvas"></canvas>
-      <span class="stream-hint">Live · Move closer for best results</span>
+    <div id="debug-bar">⏳ Loading jewelry image...</div>
+    <div class="ar-wrap">
+      <video id="input-video" autoplay playsinline muted></video>
+      <canvas id="output-canvas"></canvas>
+      <div id="loading-msg">⏳ Starting AR camera… please wait</div>
       <div id="cam-error">
-        📷 Camera not available or permission denied.<br>
-        Please allow camera access and reload the page,<br>
-        or use the <strong>Upload Photo</strong> tab instead.
+        📷 Camera access denied.<br>Please allow camera and reload,<br>
+        or use <strong>Upload Photo</strong> tab.
       </div>
-    </div>
-    <div class="capture-btn-wrap">
-      <button class="btn btn-purple" id="capture-btn" onclick="captureAndTryOn()" style="margin-top:1rem">
-        📸 Capture &amp; Try On
-      </button>
-    </div>
-    <div id="webcam-spinner" style="display:none;margin:1.5rem auto;width:36px;height:36px;border:3px solid rgba(216,191,216,.1);border-top-color:#9b3ef0;border-radius:50%;animation:spin .8s linear infinite"></div>
-    <p id="webcam-status-msg" style="display:none;color:#b89fc8;font-size:.83rem;text-align:center;margin-top:.6rem">Processing… ⏳</p>
-    <div id="webcam-result-section" style="display:none;flex-direction:column;align-items:center;margin-top:1.5rem;width:100%;max-width:640px">
-      <img id="webcam-result-img" src="" alt="Try-On Result" style="max-width:100%;border-radius:14px;border:1.5px solid rgba(180,100,255,.3);margin-bottom:1rem;box-shadow:0 0 40px rgba(90,30,180,.3)">
-      <div class="actions">
-        <a id="webcam-dl-btn" class="btn btn-purple" href="#" download="tryon_result.jpg">⬇ Download Result</a>
-        <button class="btn btn-outline" onclick="resetWebcam()">Try Again</button>
-      </div>
+      <span class="stream-hint">💎 Live AR Try-On</span>
     </div>
   </div>
 
-  <!-- Photo upload panel -->
   <div id="panel-photo">
     <div class="drop">
       <input type="file" id="faceFile" accept="image/*" onchange="handleFile(this)">
@@ -146,117 +127,243 @@
 <footer>JewelAR Virtual Try-On — {{ product.label }}</footer>
 
 <script>
-const PID = "{{ product.id }}";
-let webcamStream = null;
+const PID          = "{{ product.id }}";
+const PRODUCT_TYPE = "{{ product.type }}";
+// Use the Cloudinary URL directly so CORS is not an issue
+const JEWELRY_URL  = "{{ product.processed }}";
+
+const IDX = {
+  LEFT_EAR:232, RIGHT_EAR:454,
+  LEFT_CHEEK:234, RIGHT_CHEEK:454,
+  CHIN:152, JAW_LEFT:172, JAW_RIGHT:397,
+  LEFT_EYE:33, RIGHT_EYE:263,
+};
+
+const CFG = {
+  EARRING_Y_OFFSET_RATIO:  0.12,
+  EARRING_X_OUTWARD_RATIO: 0.04,
+  SCALE_FACTOR_EARRING:    0.14,
+  SCALE_FACTOR_NECKLACE:   0.72,
+  NECKLACE_Y_OFFSET_RATIO: 0.50,
+};
 
 // ---------------------------------------------------------------------------
-// Webcam
+// Load jewelry image directly from Cloudinary URL (no CORS issue)
 // ---------------------------------------------------------------------------
+const debugBar   = document.getElementById('debug-bar');
+const jewelryImg = new Image();
+jewelryImg.crossOrigin = "anonymous";
 
-async function startWebcam() {
-  const video  = document.getElementById('webcam-video');
-  const errDiv = document.getElementById('cam-error');
+jewelryImg.onload = () => {
+  debugBar.textContent = `✓ Jewelry loaded (${jewelryImg.naturalWidth}x${jewelryImg.naturalHeight}px) — type: ${PRODUCT_TYPE}`;
+  debugBar.style.color = '#80ffb0';
+  // Pre-split earring pair
+  if (PRODUCT_TYPE === 'earring_pair') {
+    const iw = jewelryImg.naturalWidth;
+    const ih = jewelryImg.naturalHeight;
+    earringL = document.createElement('canvas');
+    earringR = document.createElement('canvas');
+    earringL.width  = iw/2; earringL.height = ih;
+    earringR.width  = iw/2; earringR.height = ih;
+    earringL.getContext('2d').drawImage(jewelryImg,    0, 0, iw/2, ih, 0, 0, iw/2, ih);
+    earringR.getContext('2d').drawImage(jewelryImg, iw/2, 0, iw/2, ih, 0, 0, iw/2, ih);
+  }
+};
+
+jewelryImg.onerror = (e) => {
+  debugBar.textContent = `✗ Failed to load jewelry image from: ${JEWELRY_URL}`;
+  debugBar.style.color = '#ff7070';
+  console.error('Jewelry load error:', e, JEWELRY_URL);
+};
+
+jewelryImg.src = JEWELRY_URL;
+
+let earringL = null;
+let earringR = null;
+
+// ---------------------------------------------------------------------------
+// Landmark helpers
+// ---------------------------------------------------------------------------
+function getLM(lms, idx, W, H) {
+  return [lms[idx].x * W, lms[idx].y * H];
+}
+function dist(a, b) {
+  return Math.hypot(a[0]-b[0], a[1]-b[1]);
+}
+
+// ---------------------------------------------------------------------------
+// Draw overlay on canvas
+// ---------------------------------------------------------------------------
+function drawImg(ctx, img, cx, cy, w, h) {
+  ctx.drawImage(img, cx - w/2, cy - h/2, w, h);
+}
+
+function onResults(results, canvas, video) {
+  const W = canvas.width  = video.videoWidth  || 640;
+  const H = canvas.height = video.videoHeight || 480;
+  const ctx = canvas.getContext('2d');
+
+  // Draw mirrored video
+  ctx.save();
+  ctx.translate(W, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(results.image, 0, 0, W, H);
+  ctx.restore();
+
+  if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) {
+    debugBar.textContent = '👀 No face detected — look at the camera';
+    debugBar.style.color = '#ffcc70';
+    return;
+  }
+
+  if (!jewelryImg.complete || jewelryImg.naturalWidth === 0) {
+    debugBar.textContent = '⏳ Jewelry image still loading...';
+    return;
+  }
+
+  const lms = results.multiFaceLandmarks[0];
+
+  // All raw landmark coords (NOT mirrored yet — video is mirrored by CSS)
+  // Since we mirror the video draw, landmarks x coords need to be mirrored too
+  function mx(x) { return W - x * W; }
+  function py(y) { return y * H; }
+
+  const leftEarX   = mx(lms[132].x);
+  const leftEarY   = py(lms[132].y);
+  const rightEarX  = mx(lms[361].x);
+  const rightEarY  = py(lms[361].y);
+  const leftCheekX = mx(lms[234].x);
+  const leftCheekY = py(lms[234].y);
+  const rightCheekX= mx(lms[454].x);
+  const rightCheekY= py(lms[454].y);
+  const chinX      = mx(lms[152].x);
+  const chinY      = py(lms[152].y);
+  const jawLeftX   = mx(lms[172].x);
+  const jawLeftY   = py(lms[172].y);
+  const jawRightX  = mx(lms[397].x);
+  const jawRightY  = py(lms[397].y);
+  const leftEyeX   = mx(lms[33].x);
+  const leftEyeY   = py(lms[33].y);
+  const rightEyeX  = mx(lms[263].x);
+  const rightEyeY  = py(lms[263].y);
+
+  const faceWidth = Math.hypot(rightCheekX - leftCheekX, rightCheekY - leftCheekY);
+  const tiltAngle = Math.atan2(rightEyeY - leftEyeY, rightEyeX - leftEyeX);
+
+  debugBar.textContent = `✓ Face detected — faceWidth: ${faceWidth.toFixed(0)}px`;
+  debugBar.style.color = '#80ffb0';
+
+  ctx.save();
+
+  if (PRODUCT_TYPE === 'earring_pair' && earringL && earringR) {
+    const drop = faceWidth * CFG.EARRING_Y_OFFSET_RATIO;
+    const out  = faceWidth * CFG.EARRING_X_OUTWARD_RATIO;
+    const size = faceWidth * CFG.SCALE_FACTOR_EARRING;
+    const aspect = jewelryImg.naturalHeight / (jewelryImg.naturalWidth / 2);
+
+    // After mirror, left ear is on the left, right ear on the right
+    const lx = leftEarX  - out;
+    const ly = leftEarY  + drop;
+    const rx = rightEarX + out;
+    const ry = rightEarY + drop;
+
+    ctx.translate(lx, ly);
+    ctx.rotate(tiltAngle);
+    ctx.drawImage(earringL, -size/2, -size*aspect/2, size, size * aspect);
+    ctx.setTransform(1,0,0,1,0,0);
+
+    ctx.translate(rx, ry);
+    ctx.rotate(tiltAngle);
+    ctx.drawImage(earringR, -size/2, -size*aspect/2, size, size * aspect);
+    ctx.setTransform(1,0,0,1,0,0);
+
+  } else if (PRODUCT_TYPE === 'necklace') {
+    const size   = faceWidth * CFG.SCALE_FACTOR_NECKLACE;
+    const drop   = faceWidth * CFG.NECKLACE_Y_OFFSET_RATIO;
+    const jawMidX= (jawLeftX + jawRightX) / 2;
+    const nx     = jawMidX;
+    const ny     = chinY + drop;
+    const aspect = jewelryImg.naturalHeight / jewelryImg.naturalWidth;
+
+    ctx.translate(nx, ny);
+    ctx.rotate(tiltAngle);
+    ctx.drawImage(jewelryImg, -size/2, -size*aspect/2, size, size * aspect);
+    ctx.setTransform(1,0,0,1,0,0);
+  }
+
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Start MediaPipe
+// ---------------------------------------------------------------------------
+let faceMesh = null;
+let camera   = null;
+
+async function startAR() {
+  const video   = document.getElementById('input-video');
+  const canvas  = document.getElementById('output-canvas');
+  const errDiv  = document.getElementById('cam-error');
+  const loadMsg = document.getElementById('loading-msg');
+
   try {
-    webcamStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:'user', width:{ideal:640}, height:{ideal:480} },
       audio: false
     });
-    video.srcObject = webcamStream;
-    video.style.display = 'block';
-    errDiv.style.display = 'none';
+    video.srcObject = stream;
+
+    faceMesh = new FaceMesh({ locateFile: f =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence:  0.5,
+    });
+
+    faceMesh.onResults(r => {
+      loadMsg.style.display = 'none';
+      onResults(r, canvas, video);
+    });
+
+    camera = new Camera(video, {
+      onFrame: async () => { await faceMesh.send({ image: video }); },
+      width: 640, height: 480,
+    });
+    camera.start();
+
   } catch (err) {
-    video.style.display = 'none';
-    errDiv.style.display = 'block';
-    document.getElementById('capture-btn').style.display = 'none';
-    console.error('Camera error:', err);
+    loadMsg.style.display = 'none';
+    errDiv.style.display  = 'block';
+    debugBar.textContent  = `✗ Camera error: ${err.message}`;
+    debugBar.style.color  = '#ff7070';
   }
 }
 
-function stopWebcam() {
-  if (webcamStream) {
-    webcamStream.getTracks().forEach(t => t.stop());
-    webcamStream = null;
-  }
-}
-
-async function captureAndTryOn() {
-  const video  = document.getElementById('webcam-video');
-  const canvas = document.getElementById('webcam-canvas');
-
-  // Capture frame from video
-  canvas.width  = video.videoWidth  || 640;
-  canvas.height = video.videoHeight || 480;
-  const ctx = canvas.getContext('2d');
-  // Draw mirrored so it matches what user sees
-  ctx.translate(canvas.width, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  ctx.setTransform(1,0,0,1,0,0);
-
-  // Convert canvas to blob and send to server
-  canvas.toBlob(async (blob) => {
-    if (!blob) { alert('Could not capture frame.'); return; }
-
-    document.getElementById('webcam-spinner').style.display = 'block';
-    document.getElementById('webcam-status-msg').style.display = 'block';
-    document.getElementById('webcam-result-section').style.display = 'none';
-
-    const fd = new FormData();
-    fd.append('face', blob, 'capture.jpg');
-
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120000);
-      const res = await fetch(`/tryon-image/${PID}`, {
-        method: 'POST',
-        body: fd,
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
-      const data = await res.json();
-
-      document.getElementById('webcam-spinner').style.display = 'none';
-      document.getElementById('webcam-status-msg').style.display = 'none';
-
-      if (data.result_url) {
-        document.getElementById('webcam-result-img').src = data.result_url + '?t=' + Date.now();
-        document.getElementById('webcam-dl-btn').href = `/download/${PID}`;
-        document.getElementById('webcam-result-section').style.display = 'flex';
-      } else {
-        alert('Try-on failed: ' + (data.error || 'Unknown error'));
-      }
-    } catch (err) {
-      document.getElementById('webcam-spinner').style.display = 'none';
-      document.getElementById('webcam-status-msg').style.display = 'none';
-      alert(err.name === 'AbortError' ? 'Timed out. Please try again.' : 'Something went wrong.');
-    }
-  }, 'image/jpeg', 0.92);
-}
-
-function resetWebcam() {
-  document.getElementById('webcam-result-section').style.display = 'none';
+function stopAR() {
+  if (camera)   { camera.stop();    camera   = null; }
+  if (faceMesh) { faceMesh.close(); faceMesh = null; }
+  const v = document.getElementById('input-video');
+  if (v.srcObject) { v.srcObject.getTracks().forEach(t=>t.stop()); v.srcObject=null; }
 }
 
 // ---------------------------------------------------------------------------
 // Tab switching
 // ---------------------------------------------------------------------------
-
 function switchTab(name, el) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('panel-webcam').style.display = name === 'webcam' ? 'flex' : 'none';
-  document.getElementById('panel-photo').style.display  = name === 'photo'  ? 'flex' : 'none';
-  if (name === 'webcam') {
-    startWebcam();
-  } else {
-    stopWebcam();
-  }
+  document.getElementById('panel-webcam').style.display = name==='webcam' ? 'flex' : 'none';
+  document.getElementById('panel-photo').style.display  = name==='photo'  ? 'flex' : 'none';
+  if (name==='webcam') startAR(); else stopAR();
 }
 
 // ---------------------------------------------------------------------------
 // Photo upload
 // ---------------------------------------------------------------------------
-
 function handleFile(input) {
   document.getElementById('file-name').textContent = input.files[0]?.name || '';
 }
@@ -264,39 +371,30 @@ function handleFile(input) {
 async function uploadPhoto() {
   const file = document.getElementById('faceFile').files[0];
   if (!file) { alert('Please select a face photo first.'); return; }
-
-  document.getElementById('spinner').style.display = 'block';
+  document.getElementById('spinner').style.display    = 'block';
   document.getElementById('status-msg').style.display = 'block';
   document.getElementById('result-section').style.display = 'none';
-
   const fd = new FormData();
   fd.append('face', file);
-
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000);
-    const res = await fetch(`/tryon-image/${PID}`, {
-      method: 'POST',
-      body: fd,
-      signal: controller.signal
-    });
+    const timeout = setTimeout(()=>controller.abort(), 120000);
+    const res  = await fetch(`/tryon-image/${PID}`, {method:'POST',body:fd,signal:controller.signal});
     clearTimeout(timeout);
     const data = await res.json();
-
-    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('spinner').style.display    = 'none';
     document.getElementById('status-msg').style.display = 'none';
-
     if (data.result_url) {
-      document.getElementById('result-img').src = data.result_url + '?t=' + Date.now();
-      document.getElementById('dl-btn').href = `/download/${PID}`;
+      document.getElementById('result-img').src     = data.result_url+'?t='+Date.now();
+      document.getElementById('dl-btn').href        = `/download/${PID}`;
       document.getElementById('result-section').style.display = 'flex';
     } else {
-      alert('Try-on failed: ' + (data.error || 'Unknown error'));
+      alert('Try-on failed: '+(data.error||'Unknown error'));
     }
-  } catch (err) {
-    document.getElementById('spinner').style.display = 'none';
+  } catch(err) {
+    document.getElementById('spinner').style.display    = 'none';
     document.getElementById('status-msg').style.display = 'none';
-    alert(err.name === 'AbortError' ? 'Timed out. Please try again.' : 'Something went wrong.');
+    alert(err.name==='AbortError' ? 'Timed out. Please try again.' : 'Something went wrong.');
   }
 }
 
@@ -307,9 +405,9 @@ function resetPhoto() {
 }
 
 // ---------------------------------------------------------------------------
-// Start webcam on load
+// Auto start
 // ---------------------------------------------------------------------------
-startWebcam();
+startAR();
 </script>
 </body>
 </html>
