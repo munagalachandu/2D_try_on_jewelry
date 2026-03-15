@@ -2,7 +2,7 @@
 # app.py — Flask server: seller upload + dashboard, customer try-on
 # ---------------------------------------------------------------------------
 
-import os, uuid, json, socket
+import os, uuid, json, socket, threading
 from datetime import datetime
 
 import cv2
@@ -51,6 +51,31 @@ def remove_bg(raw_path, prod_dir):
     return _remove_bg_fn(raw_path, prod_dir)
 
 # ---------------------------------------------------------------------------
+# Pre-warm models in background so first request isn't slow
+# ---------------------------------------------------------------------------
+
+def _prewarm_models():
+    import time
+    time.sleep(5)  # wait for Flask to bind port first
+    print("[prewarm] Loading mediapipe + rembg models in background...")
+    try:
+        import numpy as _np
+        dummy = _np.zeros((100, 100, 3), dtype=_np.uint8)
+        get_face_landmarks(dummy)
+    except Exception as e:
+        print(f"[prewarm] mediapipe load note: {e}")
+    try:
+        from preprocess import remove_bg as _fn
+        global _remove_bg_fn
+        _remove_bg_fn = _fn
+        print("[prewarm] rembg ready.")
+    except Exception as e:
+        print(f"[prewarm] rembg load failed: {e}")
+    print("[prewarm] Models ready.")
+
+threading.Thread(target=_prewarm_models, daemon=True).start()
+
+# ---------------------------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------------------------
 
@@ -95,7 +120,6 @@ def _is_cloudinary_url(path: str) -> bool:
 
 
 def _upload_qr_to_cloudinary(qr_path: str, pid: str) -> str:
-    """Upload a local QR PNG to Cloudinary and return the URL, or local path on failure."""
     cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME")
     if not cloud_name:
         return qr_path
@@ -122,8 +146,7 @@ def _load_overlay_any(path: str):
     if _is_cloudinary_url(path):
         import urllib.request, tempfile
         try:
-            ext = ".png"
-            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 urllib.request.urlretrieve(path, tmp.name)
                 return load_overlay(tmp.name)
         except Exception as e:
@@ -249,7 +272,6 @@ def upload():
         raw_path = os.path.join(prod_dir, f"raw_{filename}")
         f.save(raw_path)
 
-        # remove_bg now returns a Cloudinary URL (or local path as fallback)
         processed_url = remove_bg(raw_path, prod_dir)
 
         tryon_url = f"{base_url}/tryon/{pid}"
@@ -262,8 +284,8 @@ def upload():
             "type":      field,
             "label":     label,
             "name":      f.filename,
-            "processed": processed_url,   # Cloudinary URL or local path
-            "qr":        qr_url,          # Cloudinary URL or local path
+            "processed": processed_url,
+            "qr":        qr_url,
             "tryon_url": tryon_url,
             "created":   datetime.now().isoformat(),
         })
